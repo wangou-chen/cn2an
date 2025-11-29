@@ -235,37 +235,84 @@ class Cn2An(object):
         raise ValueError(f"不符合格式的数据：{check_data}")
 
     def __integer_convert(self, integer_data: str) -> int:
-        # 核心
+        # 核心逻辑：处理缺省零的关键在于理解单位的层级关系
         output_integer = 0
-        unit = 1
-        ten_thousand_unit = 1
-        for index, cn_num in enumerate(reversed(integer_data)):
-            # 数值
-            if cn_num in NUMBER_CN2AN:
-                num = NUMBER_CN2AN[cn_num]
-                output_integer += num * unit
-            # 单位
-            elif cn_num in UNIT_CN2AN:
-                unit = UNIT_CN2AN[cn_num]
-                # 判断出万、亿、万亿
-                if unit % 10000 == 0:
-                    # 万 亿
-                    if unit > ten_thousand_unit:
-                        ten_thousand_unit = unit
-                    # 万亿
-                    else:
-                        ten_thousand_unit = unit * ten_thousand_unit
-                        unit = ten_thousand_unit
+        # 用于临时存储当前段的数值（例如，在“万”之前的“一千一百”）
+        current_value = 0
+        # 记录遇到的最大单位，用于处理“万”、“亿”等大单位
+        largest_unit_seen = 1
 
-                if unit < ten_thousand_unit:
-                    unit = unit * ten_thousand_unit
+        # 定义单位层级，从大到小
+        unit_hierarchy = [
+            ('亿', 100000000),
+            ('万', 10000),
+            ('千', 1000),
+            ('百', 100),
+            ('十', 10)
+        ]
 
-                if index == len(integer_data) - 1:
-                    output_integer += unit
+        # 将字符串转换为字符列表以便处理
+        chars = list(integer_data)
+        i = 0
+        length = len(chars)
+
+        while i < length:
+            char = chars[i]
+            
+            if char in NUMBER_CN2AN:
+                # 当前字符是数字
+                num = NUMBER_CN2AN[char]
+                
+                # 查看下一个字符是否是单位
+                if i + 1 < length and chars[i + 1] in UNIT_CN2AN:
+                    unit_char = chars[i + 1]
+                    unit_value = UNIT_CN2AN[unit_char]
+                    current_value += num * unit_value
+                    i += 2  # 跳过数字和单位
+                    
+                    # 更新遇到的最大单位
+                    if unit_value > largest_unit_seen:
+                        largest_unit_seen = unit_value
+                else:
+                    # 单独的数字，没有跟随单位，默认为1倍
+                    current_value += num
+                    i += 1
+                    
+            elif char in UNIT_CN2AN:
+                # 关键修复：处理缺省"一"的情况，如"千一"应该是1000 + 1 = 1001
+                unit_value = UNIT_CN2AN[char]
+                
+                # 检查这是否是缺省"一"的情况（单位前面没有数字）
+                if i == 0 or (i > 0 and chars[i - 1] not in NUMBER_CN2AN):
+                    current_value += 1 * unit_value  # 缺省"一"，补上
+                else:
+                    # 单位前面有数字，但可能缺省了中间单位
+                    current_value += unit_value
+                    
+                # 更新遇到的最大单位
+                if unit_value > largest_unit_seen:
+                    largest_unit_seen = unit_value
+                i += 1
+                
             else:
-                raise ValueError(f"{cn_num} 不在转化范围内")
+                i += 1
 
-        return int(output_integer)
+            # 检查是否需要将当前段的值加到总结果中（遇到大单位时）
+            if i < length:
+                next_char = chars[i] if i < length else None
+                # 如果下一个字符是更大的单位或者是字符串结束，结算当前段
+                if next_char and next_char in UNIT_CN2AN:
+                    next_unit = UNIT_CN2AN[next_char]
+                    if next_unit >= 10000:  # 万、亿等大单位
+                        output_integer += current_value * next_unit
+                        current_value = 0
+                        i += 1  # 跳过大单位
+
+        # 加上最后一段的值
+        output_integer += current_value
+
+        return output_integer
+
 
     def __decimal_convert(self, decimal_data: str) -> float:
         len_decimal_data = len(decimal_data)
